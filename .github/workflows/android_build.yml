@@ -1,0 +1,52 @@
+name: Android Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android packages
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Unzip project
+        run: |
+          rm -rf project
+          unzip -q "AppLockerMVP_camuflado.zip" -d project
+          ls -la project
+
+      - name: Install Gradle via SDKMAN and generate wrapper
+        run: |
+          curl -s "https://get.sdkman.io" | bash
+          bash -lc "source $HOME/.sdkman/bin/sdkman-init.sh && sdk install gradle 8.7"
+          bash -lc "source $HOME/.sdkman/bin/sdkman-init.sh && cd project && gradle wrapper --gradle-version 8.7"
+
+      - name: Build Debug APK
+        run: |
+          cd project
+          chmod +x ./gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: project/app/build/outputs/apk/debug/*.apk
