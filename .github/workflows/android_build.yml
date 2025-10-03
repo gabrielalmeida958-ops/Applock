@@ -25,21 +25,24 @@ jobs:
           sdkmanager --install \
             "platform-tools" \
             "platforms;android-35" "build-tools;35.0.0" \
-            "platforms;android-34" "build-tools;34.0.0"
+            "platforms;android-34" "build-tools;34.0.0" \
+            "platforms;android-33" "build-tools;33.0.2"
           yes | sdkmanager --licenses
 
       - name: Unzip project
         run: unzip -q AppLockerMVP_camuflado.zip -d project
 
-      - name: Install Gradle (SDKMAN)
+      - name: Install Gradle 7.6.2 (SDKMAN)
         run: |
           curl -s https://get.sdkman.io | bash
-          bash -lc "source $HOME/.sdkman/bin/sdkman-init.sh && sdk install gradle 8.7"
+          bash -lc "source $HOME/.sdkman/bin/sdkman-init.sh && sdk install gradle 7.6.2"
           echo 'export PATH="$HOME/.sdkman/candidates/gradle/current/bin:$PATH"' >> $GITHUB_ENV
 
       - name: Build Debug APK
         working-directory: project
-        run: gradle assembleDebug --stacktrace --info
+        env:
+          JAVA_TOOL_OPTIONS: -Xmx2g
+        run: gradle --no-daemon assembleDebug --stacktrace --info
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
