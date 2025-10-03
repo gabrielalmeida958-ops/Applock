@@ -6,12 +6,20 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { combo: "gradle-7_6_2-java-17", gradle: "7.6.2", java: "17" }
+          - { combo: "gradle-7_5_1-java-17", gradle: "7.5.1", java: "17" }
+          - { combo: "gradle-6_9_4-java-11", gradle: "6.9.4", java: "11" }
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      # sempre usa JDK 17 para instalar o Android SDK, porque o sdkmanager exige isso
+      - name: Set up JDK 17 for Android SDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -31,18 +39,27 @@ jobs:
       - name: Unzip project
         run: unzip -q AppLockerMVP_camuflado.zip -d project
 
-      - name: Install Gradle 7.5.1 (SDKMAN)
+      # instala a versão de Gradle do combo
+      - name: Install Gradle ${{ matrix.gradle }} via SDKMAN
         run: |
           curl -s https://get.sdkman.io | bash
-          bash -lc "source $HOME/.sdkman/bin/sdkman-init.sh && sdk install gradle 7.5.1"
+          bash -lc "source $HOME/.sdkman/bin/sdkman-init.sh && sdk install gradle ${{ matrix.gradle }}"
           echo 'export PATH="$HOME/.sdkman/candidates/gradle/current/bin:$PATH"' >> $GITHUB_ENV
 
-      - name: Build Debug APK
+      # troca para a JDK do combo para rodar o build
+      - name: Switch to JDK ${{ matrix.java }} for build
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+
+      - name: Build Debug APK (${{ matrix.combo }})
         working-directory: project
         run: gradle --no-daemon assembleDebug --stacktrace --info
 
-      - name: Upload APK
+      - name: Upload APK (${{ matrix.combo }})
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
+          name: app-debug-${{ matrix.combo }}
           path: project/app/build/outputs/apk/debug/*.apk
