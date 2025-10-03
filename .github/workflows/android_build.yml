@@ -11,7 +11,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # JDK 17 só para usar o sdkmanager
       - name: Set up JDK 17 for Android SDK
         uses: actions/setup-java@v4
         with:
@@ -32,66 +31,41 @@ jobs:
       - name: Unzip project
         run: unzip -q AppLockerMVP_camuflado.zip -d project
 
-      # Detecta a versão do Android Gradle Plugin no projeto
       - name: Detect AGP version
         id: detect
         run: |
-          set -e
           cd project
-          # 1) procura dependência clássica com group com.android.tools.build:gradle:x.y.z
-          AGP_LINE=$(grep -RhoE 'com\.android\.tools\.build:gradle:[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
-          if [ -n "$AGP_LINE" ]; then
-            AGP_VER=$(echo "$AGP_LINE" | head -n1 | sed -E 's/.*gradle:([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')
-          fi
-          # 2) se não achar, tenta plugins DSL: id "com.android.application" version "x.y.z"
-          if [ -z "$AGP_VER" ]; then
-            AGP_VER=$(grep -RhoE 'id\s+"com\.android\.(application|library)"\s+version\s+"[0-9]+\.[0-9]+(\.[0-9]+)?' \
-              | head -n1 | sed -E 's/.*version\s+"([0-9]+\.[0-9]+(\.[0-9]+)?)".*/\1/' || true)
-          fi
-          # 3) tenta libs.versions.toml (catálogo de versões)
-          if [ -z "$AGP_VER" ]; then
-            AGP_VER=$(grep -RhoE 'agp\s*=\s*"[0-9]+\.[0-9]+(\.[0-9]+)?' \
-              | head -n1 | sed -E 's/.*"([0-9]+\.[0-9]+(\.[0-9]+)?)".*/\1/' || true)
-          fi
-          echo "AGP_VER=${AGP_VER}"
-          echo "agp=${AGP_VER}" >> $GITHUB_OUTPUT
+          AGP_VER=$(grep -RhoE 'com\.android\.tools\.build:gradle:[0-9]+\.[0-9]+(\.[0-9]+)?' \
+            | head -n1 | sed -E 's/.*gradle:([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')
+          echo "agp=$AGP_VER" >> $GITHUB_OUTPUT
 
-      # Define Gradle e JDK compatíveis com a AGP detectada
       - name: Pick Gradle and JDK from AGP
         id: pick
         run: |
-          set -e
           AGP="${{ steps.detect.outputs.agp }}"
-          pick() {
-            echo "gradle=$1" >> $GITHUB_OUTPUT
-            echo "jdk=$2"     >> $GITHUB_OUTPUT
-          }
-          # Se não achou AGP, usa um chute seguro de legado
-          if [ -z "$AGP" ]; then
-            pick 7.2 11
-            exit 0
-          fi
-          # Funções de comparação
-          vergte() { [ "$1" = "$2" ] || [ "$(printf '%s\n' "$1" "$2" | sort -V | head -n1)" = "$2" ]; }
-          verlte() { [ "$1" = "$2" ] || [ "$(printf '%s\n' "$1" "$2" | sort -V | head -n1)" = "$1" ]; }
-          # Mapa rápido (suficiente para fechar os erros que apareceram):
-          # AGP 8.x -> Gradle 8.1.1, JDK 17
-          # AGP 7.4 -> Gradle 7.5.1, JDK 11
-          # AGP 7.0–7.3 -> Gradle 7.2, JDK 11
-          # AGP 4.2 -> Gradle 6.7.1, JDK 11
-          # AGP <= 4.1 -> Gradle 6.5, JDK 8
-          if vergte "$AGP" "8.0.0"; then
-            pick 8.1.1 17
-          elif vergte "$AGP" "7.4.0"; then
-            pick 7.5.1 11
-          elif vergte "$AGP" "7.0.0"; then
-            pick 7.2 11
-          elif vergte "$AGP" "4.2.0"; then
-            pick 6.7.1 11
+          gradle_ver="7.2"
+          jdk_ver="11"
+          if [[ -z "$AGP" ]]; then
+            gradle_ver="7.2"
+            jdk_ver="11"
+          elif [[ "$AGP" == 8.* ]]; then
+            gradle_ver="8.1.1"
+            jdk_ver="17"
+          elif [[ "$AGP" == 7.4* ]]; then
+            gradle_ver="7.5.1"
+            jdk_ver="11"
+          elif [[ "$AGP" == 7.* ]]; then
+            gradle_ver="7.2"
+            jdk_ver="11"
+          elif [[ "$AGP" == 4.2* ]]; then
+            gradle_ver="6.7.1"
+            jdk_ver="11"
           else
-            pick 6.5 8
+            gradle_ver="6.5"
+            jdk_ver="8"
           fi
-          echo "AGP=$AGP  ->  Gradle=${{ steps.pick.outputs.gradle }}  JDK=${{ steps.pick.outputs.jdk }}"
+          echo "gradle=$gradle_ver" >> $GITHUB_OUTPUT
+          echo "jdk=$jdk_ver" >> $GITHUB_OUTPUT
 
       - name: Set up JDK for build
         uses: actions/setup-java@v4
@@ -105,7 +79,6 @@ jobs:
           bash -lc "source $HOME/.sdkman/bin/sdkman-init.sh && sdk install gradle ${{ steps.pick.outputs.gradle }}"
           echo 'export PATH="$HOME/.sdkman/candidates/gradle/current/bin:$PATH"' >> $GITHUB_ENV
 
-      # Gera o wrapper com a versão escolhida (se o zip não tiver wrapper)
       - name: Ensure Gradle wrapper
         working-directory: project
         run: |
