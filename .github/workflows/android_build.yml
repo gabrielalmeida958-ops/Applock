@@ -3,6 +3,10 @@ name: Android Build
 on:
   workflow_dispatch:
 
+env:
+  ZIP_NAME: AppLockerMVP_camuflado.zip   # << nome do ZIP que você subiu
+  PROJECT_DIR: project
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -11,7 +15,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # JDK 17 para ferramentas do Android (sdkmanager/commandlinetools)
+      # JDK 17 para instalar SDK/Build-Tools com segurança
       - name: Set up JDK 17 for Android SDK
         uses: actions/setup-java@v4
         with:
@@ -21,110 +25,80 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      # Baixa platform-tools + 29 e 30 e aceita licenças
       - name: Install Android packages
         run: |
           sdkmanager --install \
             "platform-tools" \
             "platforms;android-30" "build-tools;30.0.3" \
-            "platforms;android-29" "build-tools;29.0.3"
+            "platforms;android-29" "build-tools;29.0.3" \
+            "platforms;android-34" "build-tools;34.0.0"
           yes | sdkmanager --licenses
 
-      # Descompacta seu projeto Android no diretório ./project
       - name: Unzip project
-        run: unzip -q AppLockerMVP_camuflado.zip -d project
+        run: |
+          unzip -q "${{ env.ZIP_NAME }}" -d "${{ env.PROJECT_DIR }}"
 
-      # Detecta versão do Android Gradle Plugin (AGP) e escolhe Gradle/JDK apropriados
+      # Descobre versão do Android Gradle Plugin (AGP) para decidir JDK
       - name: Detect AGP version
-        id: agp
-        working-directory: project
+        id: detect
+        working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
           set -e
-          # Procura algo como com.android.tools.build:gradle:8.1.0 em qualquer build.gradle(.kts)
-          AGP_VER=$(grep -RhoE "com\.android\.tools\.build:gradle:[0-9]+\.[0-9]+(\.[0-9]+)?" . | head -n1 | sed -E 's/.*gradle:([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')
-          if [[ -z "$AGP_VER" ]]; then
-            echo "Não achei AGP; usando fallback 8.1" >&2
-            AGP_VER="8.1.0"
-          fi
+          AGP_VER=$(grep -RhoE "com\.android\.tools\.build:gradle:[0-9]+\.[0-9]+(\.[0-9]+)?" . | head -1 | sed -E 's/.*gradle:([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')
           echo "agp=$AGP_VER" >> "$GITHUB_OUTPUT"
 
-      - name: Pick Gradle and JDK from AGP
-        id: pick
+      # Escolhe o JDK com base no AGP (4.x/7.x = JDK 11, 8.x+ = JDK 17)
+      - name: Pick JDK for build
+        id: pickjdk
         shell: bash
         run: |
           set -e
-          agp="${{ steps.agp.outputs.agp }}"
-          gradle_ver=""
-          jdk_ver=""
-
-          # Mapeamento seguro (AGP -> Gradle/JDK)
-          if [[ "$agp" =~ ^8\.3 ]]; then
-            gradle_ver="8.7"; jdk_ver="17"
-          elif [[ "$agp" =~ ^8\.2 ]]; then
-            gradle_ver="8.6"; jdk_ver="17"
-          elif [[ "$agp" =~ ^8\.1 ]]; then
-            gradle_ver="8.4"; jdk_ver="17"
-          elif [[ "$agp" =~ ^8\.0 ]]; then
-            gradle_ver="8.2"; jdk_ver="17"
-          elif [[ "$agp" =~ ^7\.4 ]]; then
-            gradle_ver="7.6.1"; jdk_ver="17"
-          elif [[ "$agp" =~ ^7\.3 ]]; then
-            gradle_ver="7.5.1"; jdk_ver="17"
-          else
-            # Fallback conservador: Gradle 8.4 + JDK 17
-            gradle_ver="8.4"; jdk_ver="17"
+          AGP="${{ steps.detect.outputs.agp }}"
+          # padrão
+          JDK=17
+          if [[ "$AGP" =~ ^4\. || "$AGP" =~ ^7\. ]]; then
+            JDK=11
           fi
+          echo "jdk=$JDK" >> "$GITHUB_OUTPUT"
 
-          echo "gradle=${gradle_ver}" >> "$GITHUB_OUTPUT"
-          echo "jdk=${jdk_ver}" >> "$GITHUB_OUTPUT"
-          echo "Escolhido: AGP=$agp -> Gradle=$gradle_ver, JDK=$jdk_ver"
-
-      # Agora configuramos a JDK correta para o build do Gradle (pode ser igual à 17)
       - name: Set up JDK for build
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: ${{ steps.pick.outputs.jdk }}
+          java-version: ${{ steps.pickjdk.outputs.jdk }}
 
-      # Instala exatamente a versão de Gradle escolhida (via SDKMAN)
-      - name: Install Gradle via SDKMAN
-        env:
-          SDKMAN_DIR: ${{ runner.temp }}/.sdkman
+      # Instala via SDKMAN um Gradle que vamos usar só para gerar o wrapper
+      # (evita pegar Gradle 9/10 do runner)
+      - name: Install Gradle 7.6.1 via SDKMAN
         run: |
-          set -e
           curl -s https://get.sdkman.io | bash
-          source "$SDKMAN_DIR/bin/sdkman-init.sh"
-          sdk install gradle ${{ steps.pick.outputs.gradle }}
-          echo "export PATH=$SDKMAN_DIR/candidates/gradle/current/bin:\$PATH" >> $GITHUB_ENV
+          source "$HOME/.sdkman/bin/sdkman-init.sh"
+          sdk install gradle 7.6.1
 
-      # Garante que teremos um wrapper compatível (se não existir)
-      - name: Ensure Gradle wrapper
-        working-directory: project
+      # Gera/garante o wrapper usando SEMPRE o Gradle 7.6.1
+      - name: Ensure Gradle wrapper (Gradle 7.6.1)
+        working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
           set -e
-          if [[ ! -x ./gradlew ]]; then
-            echo "gradlew não existe; gerando wrapper ${{ steps.pick.outputs.gradle }}"
-            gradle wrapper --gradle-version ${{ steps.pick.outputs.gradle }}
-          fi
-
-      # Build do APK Debug
-      - name: Build Debug APK
-        working-directory: project
-        shell: bash
-        run: |
-          set -e
-          # Prioriza wrapper se existir
-          if [[ -x ./gradlew ]]; then
-            ./gradlew --no-daemon assembleDebug --stacktrace --info
+          if [ ! -f gradlew ]; then
+            "$HOME/.sdkman/candidates/gradle/current/bin/gradle" wrapper --gradle-version 7.6.1
           else
-            gradle   --no-daemon assembleDebug --stacktrace --info
+            # Mesmo que exista, força o wrapper para 7.6.1 para não cair no Gradle 9/10
+            "$HOME/.sdkman/candidates/gradle/current/bin/gradle" wrapper --gradle-version 7.6.1
           fi
+          chmod +x gradlew
 
-      # Faz upload do(s) APK(s) gerado(s)
+      - name: Build Debug APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
+          ./gradlew --no-daemon assembleDebug --stacktrace --info
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          path: project/**/build/outputs/apk/**/debug/*.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
