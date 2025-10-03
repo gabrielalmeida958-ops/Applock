@@ -11,11 +11,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 11
+      # 1) JDK 17 para sdkmanager (exigido pela action)
+      - name: Set up JDK 17 (for Android SDK)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 11
+          java-version: 17
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -31,11 +32,18 @@ jobs:
       - name: Unzip project
         run: unzip -q AppLockerMVP_camuflado.zip -d project
 
+      # 2) Gradle 6.9.4 e JDK 11 para compilar projeto antigo
       - name: Install Gradle 6.9.4 (SDKMAN)
         run: |
           curl -s https://get.sdkman.io | bash
           bash -lc "source $HOME/.sdkman/bin/sdkman-init.sh && sdk install gradle 6.9.4"
           echo 'export PATH="$HOME/.sdkman/candidates/gradle/current/bin:$PATH"' >> $GITHUB_ENV
+
+      - name: Switch to JDK 11 (for Gradle build)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 11
 
       - name: Build Debug APK
         working-directory: project
