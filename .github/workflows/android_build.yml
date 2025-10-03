@@ -20,16 +20,26 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Unzip project
+      - name: Install Android packages
         run: |
-          unzip -q AppLockerMVP_camuflado.zip -d project
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" "build-tools;35.0.0" \
+            "platforms;android-34" "build-tools;34.0.0"
+          yes | sdkmanager --licenses
 
-      - name: Grant execution permission
-        run: chmod +x ./project/gradlew
+      - name: Unzip project
+        run: unzip -q AppLockerMVP_camuflado.zip -d project
+
+      - name: Install Gradle (SDKMAN)
+        run: |
+          curl -s https://get.sdkman.io | bash
+          bash -lc "source $HOME/.sdkman/bin/sdkman-init.sh && sdk install gradle 8.7"
+          echo 'export PATH="$HOME/.sdkman/candidates/gradle/current/bin:$PATH"' >> $GITHUB_ENV
 
       - name: Build Debug APK
         working-directory: project
-        run: ./gradlew assembleDebug --stacktrace --info
+        run: gradle assembleDebug --stacktrace --info
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
